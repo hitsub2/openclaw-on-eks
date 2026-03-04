@@ -17,6 +17,12 @@ resource "helm_release" "kata_deploy" {
         operator: Equal
         value: "true"
         effect: NoSchedule
+    shims:
+      disableAll: true
+      qemu:
+        enabled: true
+      clh:
+        enabled: true
     EOT
   ]
 
