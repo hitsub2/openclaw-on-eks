@@ -1,0 +1,79 @@
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="BOUNDARY"
+
+--BOUNDARY
+
+#!/bin/bash
+
+yum install -y mdadm
+
+# Find truly unused NVMe devices
+NVME_DEVICES=""
+for dev in /dev/nvme*n1; do
+    if [ -b "$dev" ]; then
+        # Skip if mounted or has partitions or in use
+        if lsblk -n -o MOUNTPOINT "$dev" | grep -q . || \
+           lsblk -n "$dev" | grep -q part || \
+           fuser "$dev" 2>/dev/null || \
+           mdadm --examine "$dev" 2>/dev/null | grep -q "Magic"; then
+            echo "Skipping $dev - in use"
+            continue
+        fi
+        NVME_DEVICES="$NVME_DEVICES $dev"
+    fi
+done
+
+NVME_DEVICES=$(echo $NVME_DEVICES | xargs)
+DEVICE_COUNT=$(echo $NVME_DEVICES | wc -w)
+
+if [ $DEVICE_COUNT -gt 1 ]; then
+    echo "Creating RAID0 with $DEVICE_COUNT devices: $NVME_DEVICES"
+    mdadm --create /dev/md0 --level=0 --raid-devices=$DEVICE_COUNT $NVME_DEVICES --force --assume-clean
+    sleep 10
+    mkfs.ext4 -F /dev/md0
+
+    mkdir -p /mnt/celeborn_ratis
+    mkdir -p /mnt/disk1
+    mkdir -p /mnt/disk2
+    mount /dev/md0 /mnt
+    echo "/dev/md0 /mnt ext4 defaults,nofail 0 2" >> /etc/fstab
+
+
+
+elif [ $DEVICE_COUNT -eq 1 ]; then
+    echo "Using single device: $NVME_DEVICES"
+    mkfs.ext4 -F $NVME_DEVICES
+
+    mkdir -p /mnt/celeborn_ratis
+    mkdir -p /mnt/disk1
+    mkdir -p /mnt/disk2
+    mount $NVME_DEVICES /mnt
+    echo "$NVME_DEVICES /mnt ext4 defaults,nofail 0 2" >> /etc/fstab
+
+else
+    echo "No available NVMe devices found"
+    exit 0
+fi
+
+echo "High-performance storage mounted to /mnt"
+
+--BOUNDARY
+Content-Type: application/node.eks.aws
+
+apiVersion: node.eks.aws/v1alpha1
+kind: NodeConfig
+spec:
+  cluster:
+    apiServerEndpoint: https://A95A63F7C61516803BD57BED5B3C3189.gr7.us-west-2.eks.amazonaws.com
+    certificateAuthority: LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSURCVENDQWUyZ0F3SUJBZ0lJZld2Z0pnYzNDckV3RFFZSktvWklodmNOQVFFTEJRQXdGVEVUTUJFR0ExVUUKQXhNS2EzVmlaWEp1WlhSbGN6QWVGdzB5TlRFeU1EZ3dPRFF3TkRKYUZ3MHpOVEV5TURZd09EUTFOREphTUJVeApFekFSQmdOVkJBTVRDbXQxWW1WeWJtVjBaWE13Z2dFaU1BMEdDU3FHU0liM0RRRUJBUVVBQTRJQkR3QXdnZ0VLCkFvSUJBUURRQVFzV3dxb2g0bEx6NVYwbW1mUEgzbWhBSEgyR2puZHZTakZWaTBSWGEzMU9KUmRaam1SejJpOWoKdkQ0WGF3d2xhNGR5Z3pZTVV1QXE1US9kc3V4TjFhQVV5aUVqZzFpNnRJME1UYXVuMHBtTDgzWjViUzJPM2w2YwptOWozVFRnb2M2VVhWNVRnQzVBekFHcUEyVzJPQWRtODdOeW41VnBFZFc1d3k1QVNJbFRUajM3OVU1azY3bFppCllhWjlxRndwN3FSQ1VoZVFYWUVBSENwYjE4NkpFVkFPeWVUaXVCUit4U2MxWCt0cG01bEQ3dW9LL1A0QWdyYWMKa1FuQnk5N0FjcDFUcmxkSjhmNVlBVGZScmJxLzJ4OWpjZ2hTMU1jdjVtdmt3UkN1aFF3RnRLZE1jL3crbFdpSQppL2VSYnRsV0MzUWtWbVJTb3NGeUo0YjBEU0RsQWdNQkFBR2pXVEJYTUE0R0ExVWREd0VCL3dRRUF3SUNwREFQCkJnTlZIUk1CQWY4RUJUQURBUUgvTUIwR0ExVWREZ1FXQkJUVjVjdmZZUlkxbnpaYnVzRzQrOXNxeXRuMDlEQVYKQmdOVkhSRUVEakFNZ2dwcmRXSmxjbTVsZEdWek1BMEdDU3FHU0liM0RRRUJDd1VBQTRJQkFRQjhwS3lzOXlmRwoxQlVYTFdyMWwyRTAzSHk2QUs3b0kyWE1xeHY0dnJQOGRWTEE2WkFCVElHYVlHbWY5VnQyWFVKY1FOWEVBRmcxCjJMdmtuNnkySThvQURmQzd5Ty9NZGVmV3ZFQVphSzZxQk96V0RrcS9HVGU3WmFqcEpyaittOVI2WGpHT05aV2IKRVJJM1YvQmdoUXJxWU1zc2pzMVpTcXlwV3BZVEQyRzhDU2d4aWMrQXZyV0NSY0x4dnJzMXRCb29jR3BvemwvSQpzZEtDM3RLSUlsZlBBVEx5VE1jRVUvUXJmd2cyUWVPdlNyWWM3L2l3eGp5eWJQWVdSbHZXcUFydk56dllVRzg3Cm4vbE1vZjdWZm4rTlVTQWV1eC9RbWNhdjJRdmxqT1dhV1FXYk9IemM1OVVsNlJCd21aRy9oWHNHRTI0SjZPMmUKN2IyN1lyeC96MzRMCi0tLS0tRU5EIENFUlRJRklDQVRFLS0tLS0K
+    cidr: 172.20.0.0/16
+    name: spark-celeborn-oppo
+  kubelet:
+    config:
+      maxPods: 58
+      clusterDNS:
+      - 172.20.0.10
+    flags:
+    - "--node-labels=app=celeborn,eks.amazonaws.com/sourceLaunchTemplateVersion=4,alpha.eksctl.io/cluster-name=spark-celeborn-oppo,eks.amazonaws.com/capacityType=ON_DEMAND"
+
+--BOUNDARY--
