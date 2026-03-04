@@ -138,7 +138,11 @@ resource "kubectl_manifest" "litellm_servicemonitor" {
     }
   })
 
-  depends_on = [helm_release.litellm]
+  depends_on = [
+    helm_release.litellm,
+    helm_release.kube_prometheus_stack,
+    module.eks.cluster_addons
+  ]
 }
 
 resource "random_password" "litellm_db" {
