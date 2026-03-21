@@ -154,14 +154,62 @@ kubectl get sandbox -A
 LiteLLM is deployed as an internal service accessible within the cluster:
 
 - **Service**: `litellm.litellm.svc.cluster.local:4000`
-- **Model**: Claude Opus 4.6 (`us.anthropic.claude-opus-4-6-v1`)
-- **Database**: Standalone PostgreSQL
+- **Database**: Standalone PostgreSQL with `STORE_MODEL_IN_DB=True`
+- **UI**: Port-forward to access the admin UI: `kubectl port-forward -n litellm svc/litellm 4000:4000`
 
 Retrieve the master key:
 
 ```bash
 kubectl get secret litellm-masterkey -n litellm -o jsonpath='{.data.masterkey}' | base64 -d
 ```
+
+### Adding a Model via UI
+
+1. Port-forward the LiteLLM service:
+
+```bash
+kubectl port-forward -n litellm svc/litellm 4000:4000
+```
+
+2. Open `http://localhost:4000/ui` in your browser
+
+3. Login with the master key (retrieved above)
+
+4. Navigate to **Models** → **Add Model** and fill in:
+   - **Model Name**: e.g. `Qwen/Qwen2.5-72B-Instruct`
+   - **Provider**: `openai` (for any OpenAI-compatible API)
+   - **API Base**: your provider's endpoint, e.g. `https://api.siliconflow.cn/v1`
+   - **API Key**: your provider's API key
+
+5. Click **Save**
+
+### Adding a Model via Terraform
+
+Models can also be configured directly in `litellm.tf`:
+
+```hcl
+set {
+  name  = "proxy_config.model_list[0].model_name"
+  value = "Qwen/Qwen2.5-72B-Instruct"
+}
+
+set {
+  name  = "proxy_config.model_list[0].litellm_params.model"
+  value = "openai/Qwen/Qwen2.5-72B-Instruct"
+}
+
+set {
+  name  = "proxy_config.model_list[0].litellm_params.api_base"
+  value = "https://api.siliconflow.cn/v1"
+}
+
+set {
+  name  = "proxy_config.model_list[0].litellm_params.api_key"
+  value = "<your-api-key>"
+}
+```
+
+Then run `terraform apply` to update.
 
 ### Generate API Key for OpenClaw
 
@@ -170,36 +218,30 @@ Generate a dedicated API key for OpenClaw sandboxes:
 ```bash
 MASTER_KEY=$(kubectl get secret litellm-masterkey -n litellm -o jsonpath='{.data.masterkey}' | base64 -d)
 
-LITELLM_API_KEY=$(kubectl run -n litellm gen-key --rm -i --restart=Never --image=curlimages/curl -- \
-  curl -s -X POST http://litellm:4000/key/generate \
-  -H "Authorization: Bearer $MASTER_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{"models": ["claude-opus-4-6"], "duration": "30d"}' | grep -o '"key":"[^"]*"' | cut -d'"' -f4)
+YOUR_LITELLM_API_KEY=$(kubectl run -n litellm gen-key --rm -i --restart=Never \
+  --image=public.ecr.aws/docker/library/busybox:1.33.1 -- \
+  wget -qO- --post-data='{"models": ["Qwen/Qwen2.5-72B-Instruct"], "duration": "30d"}' \
+  --header="Authorization: Bearer $MASTER_KEY" \
+  --header="Content-Type: application/json" \
+  http://litellm:4000/key/generate | grep -o '"key":"[^"]*"' | cut -d'"' -f4)
 
-echo "LiteLLM API Key: $LITELLM_API_KEY"
+echo "YOUR_LITELLM_API_KEY: $YOUR_LITELLM_API_KEY"
 ```
 
-Use this `LITELLM_API_KEY` value as the `apiKey` in OpenClaw's LiteLLM provider configuration.
+Use the returned `key` value as the `apiKey` in OpenClaw's LiteLLM provider configuration.
 
 ### Test LiteLLM Connection
-
-Verify that LiteLLM can successfully connect to AWS Bedrock and return responses:
 
 ```bash
 MASTER_KEY=$(kubectl get secret litellm-masterkey -n litellm -o jsonpath='{.data.masterkey}' | base64 -d)
 
-kubectl run -n litellm test --rm -i --restart=Never --image=curlimages/curl -- \
-  curl -s -X POST http://litellm:4000/v1/chat/completions \
-  -H "Authorization: Bearer $MASTER_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{"model": "claude-opus-4-6", "messages": [{"role": "user", "content": "Hi"}], "max_tokens": 20}'
+kubectl run -n litellm test --rm -i --restart=Never \
+  --image=public.ecr.aws/docker/library/busybox:1.33.1 -- \
+  wget -qO- --post-data='{"model": "Qwen/Qwen2.5-72B-Instruct", "messages": [{"role": "user", "content": "Hi"}], "max_tokens": 20}' \
+  --header="Authorization: Bearer $MASTER_KEY" \
+  --header="Content-Type: application/json" \
+  http://litellm:4000/v1/chat/completions
 ```
-
-This test confirms:
-- LiteLLM proxy is running and accessible
-- Pod Identity authentication to AWS Bedrock is working
-- Claude Opus 4.6 model is properly configured
-- The proxy can successfully route requests to Bedrock
 
 ## OpenClaw Sandbox Deployment
 
