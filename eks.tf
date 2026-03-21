@@ -15,7 +15,7 @@ module "eks" {
   subnet_ids = module.vpc.private_subnets
 
   kms_key_administrators = distinct(concat([
-    "arn:aws:iam::${data.aws_caller_identity.current.account_id}:root"],
+    "arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:root"],
     var.kms_key_admin_roles,
     [data.aws_iam_session_context.current.issuer_arn]
   ))
@@ -44,7 +44,7 @@ module "eks" {
 
   eks_managed_node_group_defaults = {
     iam_role_additional_policies = {
-      AmazonSSMManagedInstanceCore = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+      AmazonSSMManagedInstanceCore = "arn:${data.aws_partition.current.partition}:iam::aws:policy/AmazonSSMManagedInstanceCore"
     }
 
     ebs_optimized = true

@@ -1,3 +1,17 @@
+resource "aws_iam_policy" "litellm_bedrock" {
+  name_prefix = "${local.name}-litellm-bedrock-"
+  tags        = local.tags
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect   = "Allow"
+      Action   = ["bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream"]
+      Resource = "*"
+    }]
+  })
+}
+
 resource "kubernetes_namespace_v1" "litellm" {
   metadata {
     name = "litellm"
@@ -20,7 +34,7 @@ resource "aws_iam_role" "litellm_pod_identity" {
     Statement = [{
       Effect = "Allow"
       Principal = {
-        Service = "pods.eks.amazonaws.com"
+        Service = local.pod_identity_principal
       }
       Action = [
         "sts:AssumeRole",
@@ -32,7 +46,7 @@ resource "aws_iam_role" "litellm_pod_identity" {
 
 resource "aws_iam_role_policy_attachment" "litellm_bedrock" {
   role       = aws_iam_role.litellm_pod_identity.name
-  policy_arn = aws_iam_policy.openclaw_bedrock.arn
+  policy_arn = aws_iam_policy.litellm_bedrock.arn
 }
 
 resource "aws_eks_pod_identity_association" "litellm" {
@@ -60,13 +74,53 @@ resource "helm_release" "litellm" {
   # Use latest stable image
   set {
     name  = "image.tag"
-    value = "main-latest"
+    value = "litellm-main-latest"
+  }
+
+  set {
+    name  = "image.repository"
+    value = "public.ecr.aws/t6v6o5d5/kube-prometheus"
   }
 
   # Database
   set {
     name  = "db.deployStandalone"
     value = "true"
+  }
+
+  set {
+    name  = "envVars.STORE_MODEL_IN_DB"
+    value = "True"
+  }
+
+  set {
+    name  = "proxy_config.general_settings.database_url"
+    value = "os.environ/DATABASE_URL"
+  }
+
+  set {
+    name  = "db.url"
+    value = "postgresql://$(DATABASE_USERNAME):$(DATABASE_PASSWORD)@$(DATABASE_HOST)/$(DATABASE_NAME)"
+  }
+
+  set {
+    name  = "global.security.allowInsecureImages"
+    value = "true"
+  }
+
+  set {
+    name  = "postgresql.image.registry"
+    value = "public.ecr.aws"
+  }
+
+  set {
+    name  = "postgresql.image.repository"
+    value = "bitnami/postgresql"
+  }
+
+  set {
+    name  = "postgresql.image.tag"
+    value = "latest"
   }
 
   set_sensitive {
@@ -82,20 +136,30 @@ resource "helm_release" "litellm" {
   # Bedrock model - Claude Opus 4.6 (cross-region inference profile)
   set {
     name  = "proxy_config.model_list[0].model_name"
-    value = "claude-opus-4-6"
+    value = "Qwen/Qwen2.5-72B-Instruct"
   }
 
   set {
     name  = "proxy_config.model_list[0].litellm_params.model"
-    value = "bedrock/us.anthropic.claude-opus-4-6-v1"
+    value = "openai/Qwen/Qwen2.5-72B-Instruct"
   }
 
   set {
-    name  = "proxy_config.model_list[0].litellm_params.aws_region_name"
-    value = "us-east-1"
+    name  = "proxy_config.model_list[0].litellm_params.api_base"
+    value = "https://api.siliconflow.cn/v1"
+  }
+
+  set {
+    name  = "proxy_config.model_list[0].litellm_params.api_key"
+    value = "sk-vfkzyufmjvsyrswasvbolmjyfinokwdodnsgyutolcnyctkg"
   }
 
   # Enable Prometheus metrics
+  set {
+    name  = "proxy_config.litellm_settings.drop_params"
+    value = "true"
+  }
+
   set {
     name  = "proxy_config.litellm_settings.callbacks[0]"
     value = "prometheus"
@@ -147,12 +211,12 @@ resource "kubectl_manifest" "litellm_servicemonitor" {
 
 resource "random_password" "litellm_db" {
   length  = 32
-  special = true
+  special = false
 }
 
 resource "random_password" "litellm_db_admin" {
   length  = 32
-  special = true
+  special = false
 }
 
 

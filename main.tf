@@ -2,11 +2,6 @@ provider "aws" {
   region = local.region
 }
 
-provider "aws" {
-  alias  = "ecr"
-  region = "us-east-1"
-}
-
 provider "kubernetes" {
   host                   = module.eks.cluster_endpoint
   cluster_ca_certificate = base64decode(module.eks.cluster_certificate_authority_data)
@@ -50,6 +45,12 @@ data "aws_iam_session_context" "current" {
 locals {
   name   = var.name
   region = var.region
+
+  is_china_region = var.is_china_region != null ? var.is_china_region : startswith(var.region, "cn-")
+  partition       = local.is_china_region ? "aws-cn" : "aws"
+  dns_suffix      = local.is_china_region ? "amazonaws.com.cn" : "amazonaws.com"
+
+  pod_identity_principal = "pods.eks.amazonaws.com"
 
   kata_namespace     = "kata-system"
   openclaw_namespace = "openclaw"

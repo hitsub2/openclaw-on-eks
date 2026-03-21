@@ -10,6 +10,12 @@ variable "region" {
   default     = "us-west-2"
 }
 
+variable "is_china_region" {
+  description = "Whether deploying to AWS China region. Auto-detected from region if not set."
+  type        = bool
+  default     = null
+}
+
 variable "eks_cluster_version" {
   description = "EKS Cluster version"
   default     = "1.31"
@@ -49,3 +55,4 @@ variable "kms_key_admin_roles" {
   type        = list(string)
   default     = []
 }
+

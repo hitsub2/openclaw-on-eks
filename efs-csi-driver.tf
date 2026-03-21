@@ -93,7 +93,7 @@ resource "aws_iam_role" "efs_csi_pod_identity" {
       {
         Effect = "Allow"
         Principal = {
-          Service = "pods.eks.amazonaws.com"
+          Service = local.pod_identity_principal
         }
         Action = [
           "sts:AssumeRole",
@@ -132,7 +132,7 @@ resource "aws_eks_pod_identity_association" "efs_csi_driver" {
 # Install EFS CSI Driver
 resource "helm_release" "aws_efs_csi_driver" {
   name       = "aws-efs-csi-driver"
-  repository = "https://kubernetes-sigs.github.io/aws-efs-csi-driver"
+  repository = "oci://public.ecr.aws/t6v6o5d5/helm"
   chart      = "aws-efs-csi-driver"
   namespace  = "kube-system"
   version    = "3.0.8"

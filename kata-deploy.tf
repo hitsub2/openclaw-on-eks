@@ -10,6 +10,9 @@ resource "helm_release" "kata_deploy" {
 
   values = [
     <<-EOT
+    image:
+      reference: public.ecr.aws/t6v6o5d5/kube-prometheus
+      tag: kata-deploy-3.27.0
     nodeSelector:
       workload-type: kata
     tolerations:
