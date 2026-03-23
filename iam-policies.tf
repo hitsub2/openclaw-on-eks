@@ -307,7 +307,7 @@ resource "aws_iam_role" "eks_cluster" {
     Statement = [{
       Sid       = "EKSClusterAssumeRole"
       Effect    = "Allow"
-      Principal = { Service = "eks.${local.dns_suffix}" }
+      Principal = { Service = "eks.amazonaws.com" }
       Action    = ["sts:AssumeRole", "sts:TagSession"]
     }]
   })
@@ -361,7 +361,7 @@ resource "aws_iam_role" "eks_node_group" {
     Version = "2012-10-17"
     Statement = [{
       Effect    = "Allow"
-      Principal = { Service = "ec2.${local.dns_suffix}" }
+      Principal = { Service = "ec2.amazonaws.com" }
       Action    = "sts:AssumeRole"
     }]
   })
