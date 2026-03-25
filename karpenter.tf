@@ -8,8 +8,9 @@ module "karpenter" {
   enable_pod_identity             = true
   create_pod_identity_association = true
 
-  create_node_iam_role = false
-  node_iam_role_arn    = aws_iam_role.karpenter_node.arn
+  node_iam_role_additional_policies = {
+    AmazonSSMManagedInstanceCore = "arn:${data.aws_partition.current.partition}:iam::aws:policy/AmazonSSMManagedInstanceCore"
+  }
 
   tags = local.tags
 
@@ -141,7 +142,7 @@ resource "kubectl_manifest" "kata_node_class" {
             cidr: ${module.vpc.vpc_cidr_block}
 
         --BOUNDARY--
-      role: ${aws_iam_role.karpenter_node.name}
+      role: ${module.karpenter.node_iam_role_name}
       subnetSelectorTerms:
         - tags:
             karpenter.sh/discovery: ${module.eks.cluster_name}
