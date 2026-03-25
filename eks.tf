@@ -7,6 +7,9 @@ module "eks" {
 
   cluster_endpoint_public_access = true
 
+  create_iam_role = false
+  iam_role_arn    = aws_iam_role.eks_cluster.arn
+
   enable_cluster_creator_admin_permissions = true
 
   access_entries = var.access_entries
@@ -43,9 +46,8 @@ module "eks" {
   }
 
   eks_managed_node_group_defaults = {
-    iam_role_additional_policies = {
-      AmazonSSMManagedInstanceCore = "arn:${data.aws_partition.current.partition}:iam::aws:policy/AmazonSSMManagedInstanceCore"
-    }
+    create_iam_role = false
+    iam_role_arn    = aws_iam_role.eks_node_group.arn
 
     ebs_optimized = true
     block_device_mappings = {
