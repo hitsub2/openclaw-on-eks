@@ -377,6 +377,250 @@ Once deployed, test the integration:
 - Ensure app has correct permissions and event subscriptions
 - Check that App ID and App Secret are correct
 
+## Deploy Hermes Agent Example
+
+[Hermes Agent](https://github.com/NousResearch/hermes-agent) is an open-source AI agent by Nous Research with persistent memory, self-improving skills, and multi-platform messaging support. This section deploys Hermes Agent as a Kata-isolated sandbox with Feishu integration, using LiteLLM for model access.
+
+### Prerequisites
+
+- LiteLLM is deployed and accessible (see [LiteLLM Configuration](#litellm-configuration))
+- A Feishu app created at [open.feishu.cn](https://open.feishu.cn) with:
+  - **Bot** capability enabled
+  - Permissions: `im:message`, `im:message:send_as_bot`
+  - Event subscription: `im.message.receive_v1`
+  - App published and approved
+
+### 1. Generate a LiteLLM API Key for Hermes
+
+```bash
+MASTER_KEY=$(kubectl get secret litellm-masterkey -n litellm -o jsonpath='{.data.masterkey}' | base64 -d)
+
+kubectl port-forward svc/litellm -n litellm 4000:4000 &
+PF_PID=$!
+sleep 3
+
+HERMES_API_KEY=$(curl -s -X POST "http://localhost:4000/key/generate" \
+  -H "Authorization: Bearer $MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"key_alias": "hermes-agent"}' | python3 -c "import sys,json;print(json.load(sys.stdin)['key'])")
+
+kill $PF_PID 2>/dev/null
+echo "HERMES_API_KEY: $HERMES_API_KEY"
+```
+
+### 2. Create Kubernetes Secrets
+
+```bash
+kubectl create ns hermes
+
+# LiteLLM API key
+kubectl create secret generic hermes-litellm-key -n hermes \
+  --from-literal=api-key="${HERMES_API_KEY}"
+
+# Feishu credentials
+kubectl create secret generic hermes-feishu -n hermes \
+  --from-literal=app-id='YOUR_FEISHU_APP_ID' \
+  --from-literal=app-secret='YOUR_FEISHU_APP_SECRET'
+```
+
+### 3. Create Hermes ConfigMap
+
+```bash
+kubectl apply -f - <<'EOF'
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: hermes-config
+  namespace: hermes
+data:
+  config.yaml: |
+    model:
+      default: "claude-opus-4-6"
+      provider: "custom"
+      base_url: "http://litellm.litellm.svc.cluster.local:4000/v1"
+    terminal:
+      backend: "local"
+      cwd: "/mnt/workspace"
+      timeout: 180
+    agent:
+      max_turns: 60
+    memory:
+      memory_enabled: true
+      user_profile_enabled: true
+    display:
+      streaming: true
+EOF
+```
+
+Adjust `model.default` to match a model name configured in your LiteLLM instance. List available models:
+
+```bash
+MASTER_KEY=$(kubectl get secret litellm-masterkey -n litellm -o jsonpath='{.data.masterkey}' | base64 -d)
+kubectl run -n litellm list-models --rm -i --restart=Never \
+  --image=curlimages/curl -- \
+  curl -s http://litellm:4000/v1/models -H "Authorization: Bearer $MASTER_KEY" | python3 -c "import sys,json;[print(m['id']) for m in json.load(sys.stdin)['data']]"
+```
+
+### 4. Deploy Hermes Sandbox
+
+Save the following as `examples/hermes-feishu-sandbox.yaml`:
+
+```yaml
+apiVersion: agents.x-k8s.io/v1alpha1
+kind: Sandbox
+metadata:
+  name: hermes-feishu-sandbox
+  namespace: hermes
+spec:
+  podTemplate:
+    metadata:
+      labels:
+        sandbox: hermes-feishu-sandbox
+    spec:
+      runtimeClassName: kata-qemu
+      automountServiceAccountToken: true
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+      nodeSelector:
+        katacontainers.io/kata-runtime: "true"
+      tolerations:
+      - key: kata
+        operator: Equal
+        value: "true"
+        effect: NoSchedule
+      containers:
+        - name: hermes
+          image: nousresearch/hermes-agent:latest
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false
+            runAsNonRoot: true
+            capabilities:
+              drop:
+                - ALL
+          command:
+            - sh
+            - -c
+            - |
+              mkdir -p /mnt/workspace/.hermes
+              cp /config/config.yaml /mnt/workspace/.hermes/config.yaml
+              exec /opt/hermes/.venv/bin/hermes gateway
+          env:
+          - name: HERMES_HOME
+            value: "/mnt/workspace/.hermes"
+          - name: OPENAI_API_KEY
+            valueFrom:
+              secretKeyRef:
+                name: hermes-litellm-key
+                key: api-key
+          - name: FEISHU_APP_ID
+            valueFrom:
+              secretKeyRef:
+                name: hermes-feishu
+                key: app-id
+          - name: FEISHU_APP_SECRET
+            valueFrom:
+              secretKeyRef:
+                name: hermes-feishu
+                key: app-secret
+          - name: FEISHU_DOMAIN
+            value: "feishu"
+          - name: FEISHU_CONNECTION_MODE
+            value: "websocket"
+          - name: GATEWAY_ALLOW_ALL_USERS
+            value: "true"
+          resources:
+            requests:
+              cpu: "2"
+              memory: "4Gi"
+            limits:
+              cpu: "2"
+              memory: "4Gi"
+          volumeMounts:
+            - mountPath: /mnt/workspace
+              name: workspaces-pvc
+            - mountPath: /config
+              name: config
+      volumes:
+        - name: config
+          configMap:
+            name: hermes-config
+  volumeClaimTemplates:
+    - metadata:
+        name: workspaces-pvc
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            storage: 10Gi
+```
+
+Deploy:
+
+```bash
+kubectl apply -f examples/hermes-feishu-sandbox.yaml
+```
+
+### 5. Verify Deployment
+
+```bash
+# Check sandbox status
+kubectl get sandbox hermes-feishu-sandbox -n hermes
+
+# Watch pod come up
+kubectl get pods -n hermes -l sandbox=hermes-feishu-sandbox -w
+
+# Check logs for Feishu WebSocket connection
+kubectl logs -n hermes -l sandbox=hermes-feishu-sandbox --tail=20
+```
+
+You should see:
+
+```
+⚕ Hermes Gateway Starting...
+[Lark] connected to wss://msg-frontier.feishu.cn/ws/v2?...
+```
+
+### 6. Test in Feishu
+
+1. Open Feishu and find the bot in your app list
+2. Send a direct message like "你好" or "Hello"
+3. Hermes should respond via Claude through LiteLLM
+
+### Key Differences from OpenClaw Sandbox
+
+| Feature | OpenClaw | Hermes Agent |
+|---------|----------|--------------|
+| Config format | JSON in command | ConfigMap + K8s Secrets |
+| Credentials | Inline in pod spec | K8s Secrets via `secretKeyRef` |
+| Feishu connection | Webhook | WebSocket (no public URL needed) |
+| Memory | Stateless | Persistent memory + skills |
+| Gateway command | `node dist/index.js gateway` | `hermes gateway` |
+| Model config | `openclaw.json` providers | `config.yaml` with `provider: custom` |
+
+### Security Notes
+
+- Feishu App Secret and LiteLLM API key are stored as K8s Secrets, not inline
+- Set `GATEWAY_ALLOW_ALL_USERS=false` and use `FEISHU_ALLOWED_USERS=ou_xxx,ou_yyy` for production
+- Kata VM isolation provides kernel-level separation from the host
+- All Linux capabilities are dropped; privilege escalation is disabled
+- Hermes WebSocket mode requires only outbound connectivity — no ingress needed
+
+### Troubleshooting
+
+| Problem | Solution |
+|---------|----------|
+| No response in Feishu | Check `im.message.receive_v1` event subscription is enabled in Feishu console |
+| `All unauthorized users will be denied` | Set `GATEWAY_ALLOW_ALL_USERS=true` or configure `FEISHU_ALLOWED_USERS` |
+| `Invalid model name` | Run the list-models command above and update `model.default` in ConfigMap |
+| `hermes: executable file not found` | Binary is at `/opt/hermes/.venv/bin/hermes`, not in PATH |
+| Pod stuck in Pending | Check Karpenter is provisioning bare-metal nodes: `kubectl logs -n karpenter -l app.kubernetes.io/name=karpenter` |
+| PVC Multi-Attach error | Scale deployment to 0 first, wait for old pod to terminate, then scale back up |
+
 ## Monitoring with Prometheus and Grafana
 
 ### Access Grafana
