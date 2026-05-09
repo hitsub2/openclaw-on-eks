@@ -9,7 +9,7 @@ resource "kubernetes_namespace_v1" "monitoring" {
 # Prometheus using kube-prometheus-stack
 resource "helm_release" "kube_prometheus_stack" {
   name       = "kube-prometheus-stack"
-  repository = "oci://public.ecr.aws/t6v6o5d5/helm"
+  repository = "https://prometheus-community.github.io/helm-charts"
   chart      = "kube-prometheus-stack"
   namespace  = kubernetes_namespace_v1.monitoring.metadata[0].name
   version    = "65.0.0"
@@ -106,7 +106,7 @@ resource "helm_release" "kube_prometheus_stack" {
 
 resource "helm_release" "grafana" {
   name       = "grafana"
-  repository = "oci://public.ecr.aws/t6v6o5d5/helm"
+  repository = "https://grafana.github.io/helm-charts"
   chart      = "grafana"
   namespace  = kubernetes_namespace_v1.monitoring.metadata[0].name
 

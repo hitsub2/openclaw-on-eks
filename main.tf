@@ -2,6 +2,16 @@ provider "aws" {
   region = local.region
 }
 
+# ECR Public always authenticates with us-east-1
+provider "aws" {
+  alias  = "ecr"
+  region = "us-east-1"
+}
+
+data "aws_ecrpublic_authorization_token" "token" {
+  provider = aws.ecr
+}
+
 provider "kubernetes" {
   host                   = module.eks.cluster_endpoint
   cluster_ca_certificate = base64decode(module.eks.cluster_certificate_authority_data)

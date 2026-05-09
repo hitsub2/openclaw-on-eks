@@ -26,6 +26,33 @@ resource "helm_release" "kata_deploy" {
         enabled: true
       clh:
         enabled: true
+    customRuntimes:
+      enabled: true
+      runtimes:
+        qemu-static:
+          baseConfig: "qemu"
+          dropIn: |
+            [runtime]
+            static_sandbox_resource_mgmt = true
+          containerd:
+            snapshotter: ""
+          crio:
+            pullType: ""
+          runtimeClass: |
+            kind: RuntimeClass
+            apiVersion: node.k8s.io/v1
+            metadata:
+              name: kata-qemu-static
+              labels:
+                app.kubernetes.io/managed-by: kata-deploy
+            handler: kata-qemu-static
+            overhead:
+              podFixed:
+                memory: "160Mi"
+                cpu: "250m"
+            scheduling:
+              nodeSelector:
+                katacontainers.io/kata-runtime: "true"
     EOT
   ]
 

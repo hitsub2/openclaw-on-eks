@@ -37,12 +37,14 @@ resource "aws_iam_role_policy" "karpenter_list_instance_profiles" {
 }
 
 resource "helm_release" "karpenter" {
-  namespace  = "kube-system"
-  name       = "karpenter"
-  repository = "oci://public.ecr.aws/karpenter"
-  chart      = "karpenter"
-  version    = "1.7.4"
-  wait       = false
+  namespace           = "kube-system"
+  name                = "karpenter"
+  repository          = "oci://public.ecr.aws/karpenter"
+  repository_username = data.aws_ecrpublic_authorization_token.token.user_name
+  repository_password = data.aws_ecrpublic_authorization_token.token.password
+  chart               = "karpenter"
+  version             = "1.7.4"
+  wait                = false
 
   values = [
     <<-EOT
@@ -186,10 +188,10 @@ resource "kubectl_manifest" "kata_node_pool" {
               values: ["on-demand"]
             - key: kubernetes.io/arch
               operator: In
-              values: ["amd64"]
+              values: ["arm64"]
             - key: node.kubernetes.io/instance-type
               operator: In
-              values: ${jsonencode(var.kata_instance_types)}
+              values: ["m6g.metal"]
       limits:
         cpu: "1000"
         memory: 1000Gi
