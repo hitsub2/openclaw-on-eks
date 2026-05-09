@@ -283,6 +283,33 @@ sed -i.bak \
 
 #### 3. Deploy Sandbox
 
+Sandboxes run on AWS Graviton (`m6g.metal`) bare-metal instances using the `kata-qemu-static` RuntimeClass. This custom runtime enables `static_sandbox_resource_mgmt`, which pre-allocates the exact CPU and memory at VM boot (required for ARM64 since hotplug is not supported).
+
+Use `runtimeClassName: kata-qemu-static` in your pod spec and specify resource requests/limits — the VM will boot with exactly those resources:
+
+```yaml
+spec:
+  runtimeClassName: kata-qemu-static
+  containers:
+    - name: my-workload
+      resources:
+        requests:
+          cpu: "2"
+          memory: "4Gi"
+        limits:
+          cpu: "2"
+          memory: "4Gi"
+  nodeSelector:
+    workload-type: kata
+  tolerations:
+    - key: kata
+      operator: Equal
+      value: "true"
+      effect: NoSchedule
+```
+
+Deploy the Slack sandbox:
+
 ```bash
 kubectl apply -f openclaw-slack-sandbox.yaml
 
@@ -295,7 +322,8 @@ kubectl logs -f openclaw-slack-sandbox
 ```
 
 The sandbox will:
-- Create a Kata VM-isolated pod on bare-metal nodes
+- Create a Kata VM-isolated pod on Graviton bare-metal nodes
+- Pre-allocate CPU/memory at boot (static sandbox resource management)
 - Mount a 2Gi EBS volume for workspace persistence
 - Connect to LiteLLM proxy for Claude Opus 4.6 access
 - Connect to Slack via Socket Mode
