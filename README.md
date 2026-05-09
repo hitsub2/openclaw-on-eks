@@ -887,8 +887,9 @@ terraform destroy
 
 Each OpenClaw sandbox runs with:
 
-- **Runtime**: `kata-qemu` - Lightweight VM isolation using QEMU hypervisor
-- **Node Selector**: `katacontainers.io/kata-runtime: "true"` - Scheduled only on bare-metal instances
+- **Runtime**: `kata-qemu-static` - Lightweight VM isolation using QEMU hypervisor with static sandbox resource management
+- **Architecture**: ARM64 (AWS Graviton) on `m6g.metal` bare-metal instances
+- **Node Selector**: `workload-type: kata` - Scheduled only on bare-metal instances
 - **Tolerations**: `kata=true:NoSchedule` - Ensures placement on dedicated Kata nodes
 - **Service Account**: `openclaw-sandbox` - No IAM permissions (LiteLLM handles Bedrock access)
 - **Security Context**:
@@ -896,6 +897,71 @@ Each OpenClaw sandbox runs with:
   - All Linux capabilities dropped
   - Privilege escalation disabled
   - Read-only root filesystem disabled (required for OpenClaw)
+
+#### Graviton with Custom Runtime (kata-qemu-static)
+
+This deployment uses AWS Graviton (`m6g.metal`) bare-metal instances with a custom Kata runtime that enables `static_sandbox_resource_mgmt`. This means:
+
+- The VM is pre-allocated with the exact CPU and memory requested at boot time
+- No CPU/memory hotplug is used — resources are fixed from the start
+- This is required for ARM64/Graviton since hotplug is not supported on this architecture
+
+The custom runtime is configured via kata-deploy's `customRuntimes` with a drop-in override:
+
+```yaml
+customRuntimes:
+  enabled: true
+  runtimes:
+    qemu-static:
+      baseConfig: "qemu"
+      dropIn: |
+        [runtime]
+        static_sandbox_resource_mgmt = true
+      containerd:
+        snapshotter: ""
+      crio:
+        pullType: ""
+      runtimeClass: |
+        kind: RuntimeClass
+        apiVersion: node.k8s.io/v1
+        metadata:
+          name: kata-qemu-static
+          labels:
+            app.kubernetes.io/managed-by: kata-deploy
+        handler: kata-qemu-static
+        overhead:
+          podFixed:
+            memory: "160Mi"
+            cpu: "250m"
+        scheduling:
+          nodeSelector:
+            katacontainers.io/kata-runtime: "true"
+```
+
+To use this runtime in your pod spec:
+
+```yaml
+spec:
+  runtimeClassName: kata-qemu-static
+  containers:
+    - name: my-workload
+      resources:
+        requests:
+          cpu: "2"
+          memory: "4Gi"
+        limits:
+          cpu: "2"
+          memory: "4Gi"
+  nodeSelector:
+    workload-type: kata
+  tolerations:
+    - key: kata
+      operator: Equal
+      value: "true"
+      effect: NoSchedule
+```
+
+The VM will boot with exactly the requested resources (plus 1 default vCPU for the Kata agent). For example, requesting 2 vCPUs results in a VM with 3 processors visible in `/proc/cpuinfo`.
 
 ### Storage and Persistence
 
@@ -955,10 +1021,10 @@ OpenClaw sandboxes connect to LiteLLM proxy with:
 - Network: Cluster network access
 
 **Bare-metal Node** (when provisioned):
-- Instance Types: m5.metal, m5d.metal, c5.metal, c5d.metal
-- CPU: 96 cores (m5.metal), 48 cores (c5.metal)
-- Memory: 384GB (m5.metal), 192GB (c5.metal)
-- NVMe: RAID0 configured for containerd devicemapper
+- Instance Type: m6g.metal (AWS Graviton)
+- Architecture: ARM64
+- CPU: 64 cores
+- Memory: 256GB
 - Root Volume: 200Gi gp3
 
 ### Channel Integrations
