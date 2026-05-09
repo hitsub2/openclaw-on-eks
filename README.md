@@ -311,7 +311,11 @@ spec:
 Deploy the Slack sandbox:
 
 ```bash
+# Standard deployment
 kubectl apply -f openclaw-slack-sandbox.yaml
+
+# Or use the Graviton-optimized example (kata-qemu-static, 2 vCPU, 4Gi memory)
+kubectl apply -f openclaw-graviton-sandbox.yaml
 
 # Monitor deployment
 kubectl get sandbox openclaw-slack-sandbox
